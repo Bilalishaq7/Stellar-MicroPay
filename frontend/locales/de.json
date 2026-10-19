@@ -582,7 +582,8 @@
     "installBody": "Zum Startbildschirm hinzufügen für schnellen Zugriff und Offline-Unterstützung",
     "installTitle": "MicroPay installieren",
     "notNow": "Jetzt nicht",
-    "offlineBanner": "Du bist offline — die Daten sind möglicherweise nicht aktuell."
+    "offlineActionDisabled": "Zahlungen und Handel sind im Offline-Modus deaktiviert",
+    "offlineBanner": "Du bist offline — die Salden sind möglicherweise veraltet und Zahlungen sind deaktiviert"
   },
 "issueToken": {
     "amountIssued": "Ausgegebener Betrag",

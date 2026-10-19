@@ -582,7 +582,8 @@
     "installBody": "Añade a tu pantalla de inicio para acceso rápido y soporte sin conexión",
     "installTitle": "Instalar MicroPay",
     "notNow": "Ahora no",
-    "offlineBanner": "Estás sin conexión — los datos pueden no estar actualizados."
+    "offlineActionDisabled": "Los pagos y las operaciones están deshabilitados mientras estás sin conexión",
+    "offlineBanner": "Estás sin conexión — los saldos pueden no estar actualizados y los pagos están deshabilitados"
   },
   "issueToken": {
     "amountIssued": "Cantidad emitida",

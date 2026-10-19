@@ -50,6 +50,7 @@ import {
   shortenAddress,
 } from "@/utils/intlFormatters";
 import { useTranslation } from "@/contexts/I18nContext";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 import clsx from "clsx";
 import { useEffect, useRef, useState } from "react";
 
@@ -139,6 +140,7 @@ export default function SendPaymentForm({
   hideMemoField = false,
 }: SendPaymentFormProps) {
   const { t } = useTranslation();
+  const isOnline = useOnlineStatus();
   const [selectedAsset, setSelectedAsset] = useState<AssetType>("XLM");
   const [networkFeeXlm, setNetworkFeeXlm] = useState(STELLAR_BASE_FEE_XLM);
   const [feeStatus, setFeeStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -1489,8 +1491,9 @@ export default function SendPaymentForm({
 
         <button
           onClick={openConfirmation}
-          disabled={!canSubmit || status !== "idle"}
-          className="btn-primary w-full flex items-center justify-center gap-2"
+          disabled={!canSubmit || status !== "idle" || !isOnline}
+          className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={!isOnline ? t("app.offlineActionDisabled") : undefined}
         >
           {status === "idle"
             ? t("sendPayment.sendWithAmount", {
@@ -1499,6 +1502,11 @@ export default function SendPaymentForm({
               })
             : t("sendPayment.processing")}
         </button>
+        {!isOnline && (
+          <p className="mt-2 text-center text-xs text-amber-400">
+            {t("app.offlineActionDisabled")}
+          </p>
+        )}
       </div>
     </div>
 
