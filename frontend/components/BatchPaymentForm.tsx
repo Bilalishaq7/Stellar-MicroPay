@@ -14,6 +14,7 @@ import {
   formatXLM,
 } from "@/utils/intlFormatters";
 import { useTranslation } from "@/contexts/I18nContext";
+import { useOnlineStatus } from "@/hooks/useOnlineStatus";
 
 const MAX_RECIPIENTS = 100;
 
@@ -51,6 +52,7 @@ export default function BatchPaymentForm({
   onBatchSuccess,
 }: BatchPaymentFormProps) {
   const { t } = useTranslation();
+  const isOnline = useOnlineStatus();
   const [recipients, setRecipients] = useState<BatchRecipient[]>([
     createRecipient(),
   ]);
@@ -358,8 +360,9 @@ export default function BatchPaymentForm({
           <button
             type="button"
             onClick={handleSendBatch}
-            disabled={!canSubmit || isProcessing || exceedsBalance || !allRowsValid}
-            className="btn-primary w-full sm:w-auto py-2.5"
+            disabled={!canSubmit || isProcessing || exceedsBalance || !allRowsValid || !isOnline}
+            className="btn-primary w-full sm:w-auto py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={!isOnline ? t("app.offlineActionDisabled") : undefined}
           >
             {isProcessing
               ? t("batchPayment.sending")
@@ -368,12 +371,18 @@ export default function BatchPaymentForm({
           <button
             type="button"
             onClick={handleRetryFailed}
-            disabled={!hasFailed || isProcessing}
-            className="btn-outline w-full sm:w-auto py-2.5"
+            disabled={!hasFailed || isProcessing || !isOnline}
+            className="btn-outline w-full sm:w-auto py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            title={!isOnline ? t("app.offlineActionDisabled") : undefined}
           >
             {t("batchPayment.retryFailed")}
           </button>
         </div>
+        {!isOnline && (
+          <p className="mt-2 text-center text-xs text-amber-400">
+            {t("app.offlineActionDisabled")}
+          </p>
+        )}
       </div>
     </div>
   );

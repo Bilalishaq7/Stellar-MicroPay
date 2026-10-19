@@ -582,7 +582,8 @@
     "installBody": "Add to your home screen for quick access and offline support",
     "installTitle": "Install MicroPay",
     "notNow": "Not Now",
-    "offlineBanner": "You're offline — data may not be up to date."
+    "offlineActionDisabled": "Payments and trades are disabled while offline",
+    "offlineBanner": "You're offline — balances may be stale and payments are disabled"
   },
   "issueToken": {
     "amountIssued": "Amount issued",
