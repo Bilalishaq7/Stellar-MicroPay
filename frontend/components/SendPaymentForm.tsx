@@ -98,7 +98,6 @@ type FavouriteEntry = {
 };
 
 const ESTIMATED_NETWORK_FEE = `${STELLAR_BASE_FEE_XLM} XLM`;
-const XLM_USD_RATE = 0.11;
 const FAVOURITES_STORAGE_KEY = "stellar-micropay:favourites";
 
 interface BarcodeDetectorResult {
@@ -526,7 +525,7 @@ export default function SendPaymentForm({
   const balance = selectedAsset === "XLM" ? xlmBal : usdcBal;
   const maxSend =
     selectedAsset === "XLM"
-      ? Math.max(0, xlmBal - STELLAR_MINIMUM_ACCOUNT_BALANCE_XLM - networkFeeXlm)
+      ? Math.max(0, xlmBal - STELLAR_MINIMUM_ACCOUNT_BALANCE_XLM)
       : usdcBal;
 
   const isUsernameDestination = /^@?[a-zA-Z0-9]{3,20}$/.test(destination) && !isValidStellarAddress(destination);
@@ -1507,10 +1506,10 @@ export default function SendPaymentForm({
         isOpen={isConfirmOpen}
         destination={destination}
         amount={amountNum}
+        asset={selectedAsset}
         memo={memo}
         memoType={memoType}
         estimatedFee={ESTIMATED_NETWORK_FEE}
-        usdValue={amountNum * XLM_USD_RATE}
         isTipOnChain={isTipOnChain}
         onCancel={() => setIsConfirmOpen(false)}
         onConfirm={() => { setIsConfirmOpen(false); executeSend(); }}
@@ -1647,6 +1646,7 @@ interface SendConfirmationModalProps {
   isOpen: boolean;
   destination: string;
   amount: number;
+  asset: string;
   memo: string;
   memoType: StellarMemoType;
   estimatedFee: string;
