@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
-# Build and deploy the Soroban contract to Stellar testnet or mainnet.
+# Build and deploy the Soroban contract to a local network, testnet or mainnet.
 #
 # Prerequisites:
-#   - Rust + wasm32-unknown-unknown target
+#   - Rust + wasm32v1-none target
 #   - Stellar CLI (cargo install --locked stellar-cli)
 #   - A funded Stellar identity
 #
 # Usage:
-#   ./scripts/deploy-contract.sh [testnet|mainnet] [identity] [--confirm]
+#   ./scripts/deploy-contract.sh [local|testnet|mainnet] [identity] [--confirm]
+#
+# "local" expects a Stellar CLI network named "local" pointing at the
+# stellar/quickstart container (see `make localnet-up` and the contract README).
 #
 # STELLAR_NETWORK and STELLAR_IDENTITY can be used as defaults.
 
@@ -16,7 +19,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 CONTRACT_DIR="$ROOT_DIR/contracts/stellar-micropay-contract"
-WASM="$CONTRACT_DIR/target/wasm32-unknown-unknown/release/stellar_micropay_contract.wasm"
+WASM="$CONTRACT_DIR/target/wasm32v1-none/release/stellar_micropay_contract.wasm"
 NETWORK="${STELLAR_NETWORK:-testnet}"
 IDENTITY="${STELLAR_IDENTITY:-alice}"
 CONFIRM_MAINNET=false
@@ -24,7 +27,7 @@ NETWORK_SET=false
 
 while (($#)); do
   case "$1" in
-    testnet|mainnet)
+    local|testnet|mainnet)
       if [[ "$NETWORK_SET" == true ]]; then
         echo "Error: specify the network only once." >&2
         exit 2
@@ -56,8 +59,8 @@ while (($#)); do
   esac
 done
 
-if [[ "$NETWORK" != testnet && "$NETWORK" != mainnet ]]; then
-  echo "Error: network must be testnet or mainnet (got '$NETWORK')." >&2
+if [[ "$NETWORK" != local && "$NETWORK" != testnet && "$NETWORK" != mainnet ]]; then
+  echo "Error: network must be local, testnet or mainnet (got '$NETWORK')." >&2
   exit 2
 fi
 
@@ -81,7 +84,8 @@ echo "  Network:  $NETWORK"
 echo "  Identity: $IDENTITY"
 
 echo "Building release WASM..."
-cargo build --manifest-path "$CONTRACT_DIR/Cargo.toml" --target wasm32-unknown-unknown --release
+cd "$CONTRACT_DIR"
+stellar contract build --locked
 
 if [[ ! -f "$WASM" ]]; then
   echo "Error: WASM file not found after build: $WASM" >&2

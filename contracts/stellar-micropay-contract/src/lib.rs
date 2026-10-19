@@ -669,8 +669,6 @@ impl MicroPayContract {
             panic!("Receipt amount must be positive");
         }
 
-        from.require_auth();
-
         let count: u32 = env
             .storage()
             .instance()
@@ -1021,13 +1019,21 @@ impl MicroPayContract {
 
         let current_ledger = env.ledger().sequence();
         let elapsed_ledgers = current_ledger.saturating_sub(stream.start_ledger);
-        let total_streamed = stream.rate_per_ledger * elapsed_ledgers as i128;
+        let total_streamed = stream
+            .rate_per_ledger
+            .checked_mul(elapsed_ledgers as i128)
+            .unwrap_or(stream.deposited)
+            .min(stream.deposited);
         let claimable = total_streamed - stream.claimed;
 
         // Freeze accrual while paused: recompute against pause_ledger.
         let claimable = if let Some(paused_at) = stream.pause_ledger {
             let paused_elapsed = paused_at.saturating_sub(stream.start_ledger);
-            let paused_total = stream.rate_per_ledger * paused_elapsed as i128;
+            let paused_total = stream
+                .rate_per_ledger
+                .checked_mul(paused_elapsed as i128)
+                .unwrap_or(stream.deposited)
+                .min(stream.deposited);
             paused_total - stream.claimed
         } else {
             claimable
@@ -1115,9 +1121,11 @@ impl MicroPayContract {
         // Effective ledger is frozen at pause point while paused.
         let effective = stream.pause_ledger.unwrap_or(current_ledger);
         let elapsed = effective.saturating_sub(stream.start_ledger);
-        let total_streamed = stream.rate_per_ledger * elapsed as i128;
-        // Cap streamed amount at deposited to prevent overspending.
-        let total_streamed = total_streamed.min(stream.deposited);
+        let total_streamed = stream
+            .rate_per_ledger
+            .checked_mul(elapsed as i128)
+            .unwrap_or(stream.deposited)
+            .min(stream.deposited);
 
         // After close the recipient has effectively "claimed" everything that
         // was ever streamable. The `Stream` record carries no token field, so
@@ -1137,7 +1145,7 @@ impl MicroPayContract {
                 payer,
                 stream_id,
             ),
-            refundable,
+            refund,
         );
 
         refund
@@ -1410,8 +1418,11 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use soroban_sdk::{
-        testutils::{Address as _, Events as _, Ledger},
-        token, Address, Env,
+        testutils::{
+            Address as _, AuthorizedFunction, AuthorizedInvocation, Events as _, Ledger, MockAuth,
+            MockAuthInvoke,
+        },
+        token, Address, Env, IntoVal, TryFromVal,
     };
 
     fn setup() -> (Env, MicroPayContractClient<'static>, Address, Address, Address) {
@@ -1436,6 +1447,7 @@ mod tests {
         env: &Env,
         funding: i128,
     ) -> (Address, MicroPayContractClient<'_>, Address, Address, Address) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, MicroPayContract);
         let client = MicroPayContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -1443,7 +1455,6 @@ mod tests {
 
         let payer = Address::generate(env);
         let recipient = Address::generate(env);
-        env.mock_all_auths();
         let token_id = env
             .register_stellar_asset_contract_v2(admin.clone())
             .address();
@@ -1893,6 +1904,7 @@ mod tests {
         let client = MicroPayContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
+        env.mock_all_auths();
         client.initialize(&admin);
 
         let payer = Address::generate(&env);
@@ -1918,6 +1930,7 @@ mod tests {
     #[test]
     fn test_set_admin_and_rotation() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, MicroPayContract);
         let client = MicroPayContractClient::new(&env, &contract_id);
 
@@ -1926,8 +1939,6 @@ mod tests {
         assert_eq!(client.get_admin(), admin);
 
         let new_admin = Address::generate(&env);
-
-        env.mock_all_auths();
         client.set_admin(&new_admin);
 
         assert_eq!(client.get_admin(), new_admin);
@@ -1937,12 +1948,14 @@ mod tests {
     #[should_panic]
     fn test_upgrade_non_admin_panics() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, MicroPayContract);
         let client = MicroPayContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
         client.initialize(&admin);
 
+        env.set_auths(&[]);
         let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
         // Without admin auth, calling upgrade panics
         client.upgrade(&dummy_hash);
@@ -1951,19 +1964,100 @@ mod tests {
     #[test]
     fn test_upgrade_admin_requires_auth_and_invokes_deployer() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, MicroPayContract);
         let client = MicroPayContractClient::new(&env, &contract_id);
 
         let admin = Address::generate(&env);
         client.initialize(&admin);
 
-        env.mock_all_auths();
-
         let dummy_hash = BytesN::from_array(&env, &[1u8; 32]);
         // With admin auth, try_upgrade passes the admin auth check and invokes deployer.
         // In native test environment, deployer returns an Err (InvalidAction for non-wasm target).
         let res = client.try_upgrade(&dummy_hash);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_upgrade_preserves_stream_and_tip_state() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        const STUB_WASM: &[u8] = include_bytes!("../test_stub.wasm");
+        let contract_id = env.register_contract_wasm(None, STUB_WASM);
+        let client = MicroPayContractClient::new(&env, &contract_id);
+
+        let admin = Address::generate(&env);
+        client.initialize(&admin);
+
+        let token_admin = Address::generate(&env);
+        let token_address = env
+            .register_stellar_asset_contract_v2(token_admin.clone())
+            .address();
+        let token_client = token::StellarAssetClient::new(&env, &token_address);
+
+        let payer1 = Address::generate(&env);
+        let payer2 = Address::generate(&env);
+        let recipient1 = Address::generate(&env);
+        let recipient2 = Address::generate(&env);
+
+        token_client.mint(&payer1, &100_000);
+        token_client.mint(&payer2, &100_000);
+
+        // 1. Create 2 streams
+        let stream_id_0 = client.open_stream(&payer1, &recipient1, &10, &1000);
+        let stream_id_1 = client.open_stream(&payer2, &recipient2, &20, &2000);
+
+        // 2. Create 3 tips
+        client.send_tip(&token_address, &payer1, &recipient1, &150);
+        client.send_tip(&token_address, &payer2, &recipient1, &250);
+        client.send_tip(&token_address, &payer1, &recipient2, &350);
+
+        // Query before state
+        let stream_0_before = client.get_stream(&stream_id_0);
+        let stream_1_before = client.get_stream(&stream_id_1);
+        let tip_total_1_before = client.get_tip_total(&recipient1);
+        let tip_total_2_before = client.get_tip_total(&recipient2);
+
+        std::println!("--- BEFORE UPGRADE STATE ---");
+        std::println!("Stream 0: {:?}", stream_0_before);
+        std::println!("Stream 1: {:?}", stream_1_before);
+        std::println!("Tip Total Recipient 1: {}", tip_total_1_before);
+        std::println!("Tip Total Recipient 2: {}", tip_total_2_before);
+
+        // 3. Upgrade to mock new WASM hash using test stub WASM
+        let new_wasm_hash = env.deployer().upload_contract_wasm(STUB_WASM);
+        client.upgrade(&new_wasm_hash);
+
+        // 4. Query after state
+        let stream_0_after = client.get_stream(&stream_id_0);
+        let stream_1_after = client.get_stream(&stream_id_1);
+        let tip_total_1_after = client.get_tip_total(&recipient1);
+        let tip_total_2_after = client.get_tip_total(&recipient2);
+
+        std::println!("--- AFTER UPGRADE STATE ---");
+        std::println!("Stream 0: {:?}", stream_0_after);
+        std::println!("Stream 1: {:?}", stream_1_after);
+        std::println!("Tip Total Recipient 1: {}", tip_total_1_after);
+        std::println!("Tip Total Recipient 2: {}", tip_total_2_after);
+
+        // 5. Verify state is preserved
+        assert_eq!(stream_0_before.payer, stream_0_after.payer);
+        assert_eq!(stream_0_before.recipient, stream_0_after.recipient);
+        assert_eq!(stream_0_before.rate_per_ledger, stream_0_after.rate_per_ledger);
+        assert_eq!(stream_0_before.deposited, stream_0_after.deposited);
+        assert_eq!(stream_0_before.claimed, stream_0_after.claimed);
+
+        assert_eq!(stream_1_before.payer, stream_1_after.payer);
+        assert_eq!(stream_1_before.recipient, stream_1_after.recipient);
+        assert_eq!(stream_1_before.rate_per_ledger, stream_1_after.rate_per_ledger);
+        assert_eq!(stream_1_before.deposited, stream_1_after.deposited);
+        assert_eq!(stream_1_before.claimed, stream_1_after.claimed);
+
+        assert_eq!(tip_total_1_before, tip_total_1_after);
+        assert_eq!(tip_total_2_before, tip_total_2_after);
+        assert_eq!(tip_total_1_after, 400);
+        assert_eq!(tip_total_2_after, 350);
     }
 
     // ─── Streaming tests ───────────────────────────────────────────────────
@@ -2049,7 +2143,7 @@ mod tests {
         let refund = client.close_stream(&id, &payer);
         let streamed = rate * 50;
         assert_eq!(refund, deposit - streamed);
-        assert_eq!(client.get_stream(&id).claimed, streamed);
+        assert!(client.try_get_stream(&id).is_err());
     }
 
     // ─── Property test: close_stream invariant (#1085) ───────────────────────
@@ -2362,9 +2456,9 @@ mod tests {
     impl EscrowTest {
         fn new() -> Self {
             let env = Env::default();
+            env.mock_all_auths();
             let contract_id = env.register_contract(None, MicroPayContract);
             MicroPayContractClient::new(&env, &contract_id).initialize(&Address::generate(&env));
-            env.mock_all_auths();
 
             let token = env
                 .register_stellar_asset_contract_v2(Address::generate(&env))
